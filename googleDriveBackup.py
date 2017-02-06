@@ -6,6 +6,7 @@ import hashlib
 
 from time import sleep
 from googleapiclient.http import MediaFileUpload
+from apiclient.errors import HttpError
 from apiclient import discovery
 from oauth2client import client
 from oauth2client import tools
@@ -120,26 +121,34 @@ def main():
 				'modifiedTime' : convertToRFC3399(os.path.getmtime(filePath))
 				}
 				
-				media = MediaFileUpload(filePath, resumable=True)
-				fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum').execute()
-				if fileUploaded["md5Checksum"] == md5(filePath):
-					print("File Uploaded Successfully")
-				else:
-					print("File's corrupted")
+				media = MediaFileUpload(filePath, chunksize=10485760, resumable=True)
+				fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
+				response = None
+				while response is None:
+					status, response = fileUploaded.next_chunk()
+					if status:
+						print ("Uploaded {0:.2f}%.".format(status.progress() * 100),end="\r")
+				print ("Upload Complete!")
+				
+				#Check MD5 checksum later
+				# if fileUploaded["md5Checksum"] == md5(filePath):
+				# 	print("File Uploaded Successfully")
+				# else:
+				# 	print("File's corrupted")
 			else:
 				print("Already Exists!")
 			
 
-	results = service.files().list(
-		pageSize=20,fields="nextPageToken, files(id, name, md5Checksum, parents)",q="'"+BKP_FOLDER_ID+"' in parents and trashed = false").execute()
-	items = results.get('files', [])
-	print(results)
-	if not items:
-		print('No files found.')
-	else:
-		print('Files:')
-		for item in items:
-			print('{0} ({1})'.format(item['name'], item['id']))
+	# results = service.files().list(
+	# 	pageSize=20,fields="nextPageToken, files(id, name, md5Checksum, parents)",q="'"+BKP_FOLDER_ID+"' in parents and trashed = false").execute()
+	# items = results.get('files', [])
+	# print(results)
+	# if not items:
+	# 	print('No files found.')
+	# else:
+	# 	print('Files:')
+	# 	for item in items:
+	# 		print('{0} ({1})'.format(item['name'], item['id']))
 
 if __name__ == '__main__':
 	main()
