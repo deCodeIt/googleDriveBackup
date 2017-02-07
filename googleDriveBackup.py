@@ -11,12 +11,14 @@ from apiclient import discovery
 from oauth2client import client
 from oauth2client import tools
 from oauth2client.file import Storage
-
+flags = None
 try:
 	import argparse
-	flags = argparse.ArgumentParser(parents=[tools.argparser]).parse_args()
+	parser = argparse.ArgumentParser()
+	parser.add_argument("-d","--directory",help="The directory path to backup");
+	flags = parser.parse_args()
 except ImportError:
-	flags = None
+	pass
 
 # If modifying these scopes, delete your previously saved credentials
 # at ~/.credentials/drive-python-quickstart.json
@@ -24,7 +26,7 @@ SCOPES = 'https://www.googleapis.com/auth/drive'
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Drive API Python Quickstart'
 BKP_FOLDER_ID = '0B0dn6haaox2Vak9aNktqZmtLWTg'
-BKP_LOCAL_DIR = 'D:\Projects\Python\Drive API\Test'
+BKP_LOCAL_DIR = 'D:\Downloads\Videos'
 
 def md5(fname):
     hash_md5 = hashlib.md5()
@@ -61,6 +63,36 @@ def get_credentials():
 		print('Storing credentials to ' + credential_path)
 	return credentials
 
+def doUpload(service, file_metadata, media, filePath):
+	filename = file_metadata.get("name")
+	fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
+
+	response = None
+	flag = False
+	while not flag:
+		try:
+			while response is None:
+				status, response = fileUploaded.next_chunk()
+				if status:
+					print ("Uploaded {0:.2f}%.".format(status.progress() * 100),end="\r")
+			# file Upload successful, corruption would be checked for later
+			print ("Upload Complete!")
+			flag = True # end the file upload
+		except HttpError as e:
+			print (e.resp.status)
+			if e.resp.status in [404]:
+			# Start the upload all over again.
+				fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
+			elif e.resp.status in [500, 502, 503, 504]:
+				continue
+			# Call next_chunk() again, but use an exponential backoff for repeated errors.
+			else:
+			# Do not retry. Log the error and fail.
+				print("An unknown error has occurred, Failed to upload: {0}".format(filename))
+				flag = True
+		except ConnectionResetError as cre:
+			print ("Connection has been reset, Resuming Upload", end="\r")
+
 def convertToRFC3399(s):
 	return datetime.datetime.fromtimestamp(s).strftime('%Y-%m-%dT%H:%M:%S+05:30');
 
@@ -70,6 +102,10 @@ def main():
 	Creates a Google Drive API service object and outputs the names and IDs
 	for up to 10 files.
 	"""
+	# backup the supplied directory
+	if flags and flags.directory:
+		BKP_LOCAL_DIR = flags.directory
+
 	credentials = get_credentials()
 	http = credentials.authorize(httplib2.Http())
 	service = discovery.build('drive', 'v3', http=http)
@@ -78,7 +114,6 @@ def main():
 
 	# traverse root directory, and list directories as dirs and files as files
 	for root, dirs, files in os.walk(BKP_LOCAL_DIR):
-		print(root)
 		path = root.split(os.sep)
 		folderName = os.path.basename(root)
 		currentFolderId = folderId.get(root,None)
@@ -107,13 +142,14 @@ def main():
 		# upload the files in the folder
 		print((len(path) - 1) * '---', os.path.basename(root))
 		for filename in files:
+			filePath = root+"\\"+filename
+			filenameDrive = filename.replace("'","\\'") # for single quote error in searching drive for file name
 			print(len(path) * '---', filename)
 			#check if file exists
-			results = service.files().list(pageSize=1,fields="files(id, name)",q="'"+currentFolderId+"' in parents and name = '"+filename+"' and mimeType != 'application/vnd.google-apps.folder' and trashed = false").execute()
+			results = service.files().list(pageSize=1,fields="files(id, name,md5Checksum)",q="'"+currentFolderId+"' in parents and name = '"+filenameDrive+"' and mimeType != 'application/vnd.google-apps.folder' and trashed = false").execute()
 			items = results.get('files', []);
-			if not items:
+			if not items or items[0]["md5Checksum"] != md5(filePath):
 				#TODO escape file check
-				filePath = root+"\\"+filename
 				file_metadata = {
 				'name' : filename,
 				'parents': [ currentFolderId ],
@@ -121,14 +157,9 @@ def main():
 				'modifiedTime' : convertToRFC3399(os.path.getmtime(filePath))
 				}
 				
-				media = MediaFileUpload(filePath, chunksize=10485760, resumable=True)
-				fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
-				response = None
-				while response is None:
-					status, response = fileUploaded.next_chunk()
-					if status:
-						print ("Uploaded {0:.2f}%.".format(status.progress() * 100),end="\r")
-				print ("Upload Complete!")
+				media = MediaFileUpload(filePath, chunksize=1048576, resumable=True)
+				
+				doUpload(service,file_metadata,media, filePath)
 				
 				#Check MD5 checksum later
 				# if fileUploaded["md5Checksum"] == md5(filePath):
