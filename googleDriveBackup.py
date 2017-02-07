@@ -76,14 +76,20 @@ def doUpload(service, file_metadata, media, filePath):
 				if status:
 					print ("Uploaded {0:.2f}%.".format(status.progress() * 100),end="\r")
 			# file Upload successful, corruption would be checked for later
-			print ("Upload Complete!")
-			flag = True # end the file upload
+			#Check MD5 checksum later
+			if response["md5Checksum"] == md5(filePath):
+				print("File Uploaded Successfully")
+				flag = True # end the file upload
+			else:
+				print("File's corrupted on Drive, Uploading Again :(", end="\r")
+				fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
+			
 		except HttpError as e:
 			print (e.resp.status)
-			if e.resp.status in [404]:
+			if e.resp.status in [ 402, 404]:
 			# Start the upload all over again.
 				fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
-			elif e.resp.status in [500, 502, 503, 504]:
+			elif e.resp.status in [500, 502, 503, 504, 408]:
 				continue
 			# Call next_chunk() again, but use an exponential backoff for repeated errors.
 			else:
@@ -161,11 +167,7 @@ def main():
 				
 				doUpload(service,file_metadata,media, filePath)
 				
-				#Check MD5 checksum later
-				# if fileUploaded["md5Checksum"] == md5(filePath):
-				# 	print("File Uploaded Successfully")
-				# else:
-				# 	print("File's corrupted")
+				
 			else:
 				print("Already Exists!")
 			
