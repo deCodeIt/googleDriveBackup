@@ -149,7 +149,7 @@ def main():
 				# the folder is present on cloud so store its id
 				folderId[dirPath] = items[0]['id']
 		# get the list of files in this folder on cloud
-		filesOnCloud = []
+		filesOnCloud = {}
 		pageToken = None
 		while True:
 			results = service.files().list(pageSize=NUM_FILES_PER_REQUEST,pageToken = pageToken,fields="files(id, name,md5Checksum), nextPageToken",q="'"+currentFolderId+"' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false").execute()
@@ -157,14 +157,20 @@ def main():
 			if not fileItems:
 				break;
 			else:
-				# get files from array to our local array
-				filesOnCloud.extend(fileItems);
+				# get files from array to our local dictionary
+				# filesOnCloud.extend(fileItems);
+				for fileC in fileItems:
+					nameOfFile = fileC.get('name')
+					md5OfFile = fileC.get('md5Checksum')
+					# idOfFile = fileC.get('id')
+					filesOnCloud[nameOfFile] = {'md5Checksum':md5OfFile} # NAME SHOULD BE UNIQUE IN A GIVEN FOLDER
+
 				if not results.get('nextPageToken',False):
 					break;
 				else:
 					pageToken = results.get('nextPageToken')
 
-		print(filesOnCloud);
+		# print(filesOnCloud);
 
 		# upload the files in the folder
 		print((len(path) - 1) * '---', os.path.basename(root))
@@ -173,24 +179,19 @@ def main():
 			filenameDrive = filename.replace("'","\\'") # for single quote error in searching drive for file name
 			print(len(path) * '---', filename)
 			#check if file exists
-			results = service.files().list(pageSize=1,fields="files(id, name,md5Checksum)",q="'"+currentFolderId+"' in parents and name = '"+filenameDrive+"' and mimeType != 'application/vnd.google-apps.folder' and trashed = false").execute()
-			items = results.get('files', []);
-			if not items or items[0]["md5Checksum"] != md5(filePath):
-				#TODO escape file check
+			fileDetail = filesOnCloud.get(filename,None);
+			if fileDetail!=None and md5(filePath) == fileDetail["md5Checksum"]:
+				print("Already Exists on Drive!")
+				continue; # file is already present on cloud
+			else:
 				file_metadata = {
 				'name' : filename,
 				'parents': [ currentFolderId ],
 				'createdTime' : convertToRFC3399(os.path.getctime(filePath)),
 				'modifiedTime' : convertToRFC3399(os.path.getmtime(filePath))
 				}
-				
 				media = MediaFileUpload(filePath, chunksize=1048576, resumable=True)
-				
 				doUpload(service,file_metadata,media, filePath)
-				
-				
-			else:
-				print("Already Exists!")
 			
 
 	# results = service.files().list(
