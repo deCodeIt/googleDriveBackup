@@ -27,7 +27,7 @@ CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Drive API Python Quickstart'
 BKP_FOLDER_ID = '0B0dn6haaox2Vak9aNktqZmtLWTg'
 BKP_LOCAL_DIR = 'D:\Projects\Python\Drive API\BKP\Test'
-NUM_FILES_PER_REQUEST = 1
+NUM_FILES_PER_REQUEST = 100
 
 def md5(fname):
     hash_md5 = hashlib.md5()
