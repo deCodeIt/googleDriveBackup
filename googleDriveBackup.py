@@ -27,6 +27,7 @@ CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Drive API Python Quickstart'
 BKP_FOLDER_ID = '0B0dn6haaox2Vak9aNktqZmtLWTg'
 BKP_LOCAL_DIR = 'D:\Projects\Python\Drive API\BKP\Test'
+NUM_FILES_PER_REQUEST = 1
 
 def md5(fname):
     hash_md5 = hashlib.md5()
@@ -105,7 +106,7 @@ def convertToRFC3399(s):
 	return datetime.datetime.fromtimestamp(s).strftime('%Y-%m-%dT%H:%M:%S+05:30');
 
 def main():
-	global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID
+	global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID, NUM_FILES_PER_REQUEST
 	"""Shows basic usage of the Google Drive API.
 
 	Creates a Google Drive API service object and outputs the names and IDs
@@ -147,6 +148,23 @@ def main():
 			else:
 				# the folder is present on cloud so store its id
 				folderId[dirPath] = items[0]['id']
+		# get the list of files in this folder on cloud
+		filesOnCloud = []
+		pageToken = None
+		while True:
+			results = service.files().list(pageSize=NUM_FILES_PER_REQUEST,pageToken = pageToken,fields="files(id, name,md5Checksum), nextPageToken",q="'"+currentFolderId+"' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false").execute()
+			fileItems = results.get('files',[])
+			if not fileItems:
+				break;
+			else:
+				# get files from array to our local array
+				filesOnCloud.extend(fileItems);
+				if not results.get('nextPageToken',False):
+					break;
+				else:
+					pageToken = results.get('nextPageToken')
+
+		print(filesOnCloud);
 
 		# upload the files in the folder
 		print((len(path) - 1) * '---', os.path.basename(root))
@@ -187,4 +205,11 @@ def main():
 	# 		print('{0} ({1})'.format(item['name'], item['id']))
 
 if __name__ == '__main__':
-	main()
+	try:
+		main()
+	except KeyboardInterrupt as e:
+		print ("Terminated By User")
+	else:
+		print("Unknown Error has Occurred -_-? ")
+		
+	
