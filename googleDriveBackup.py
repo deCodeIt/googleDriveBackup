@@ -14,7 +14,7 @@ from oauth2client.file import Storage
 flags = None
 try:
 	import argparse
-	parser = argparse.ArgumentParser()
+	parser = argparse.ArgumentParser(parents=[tools.argparser])
 	parser.add_argument("-d","--directory",help="The directory path to backup");
 	flags = parser.parse_args()
 except ImportError:
@@ -26,7 +26,7 @@ SCOPES = 'https://www.googleapis.com/auth/drive'
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Drive API Python Quickstart'
 BKP_FOLDER_ID = '0B0dn6haaox2Vak9aNktqZmtLWTg'
-BKP_LOCAL_DIR = 'D:\Downloads\Videos'
+BKP_LOCAL_DIR = 'D:\Projects\Python\Drive API\BKP\Test'
 
 def md5(fname):
     hash_md5 = hashlib.md5()
@@ -36,6 +36,7 @@ def md5(fname):
     return hash_md5.hexdigest()
 
 def get_credentials():
+	global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID
 	"""Gets valid user credentials from storage.
 
 	If nothing has been stored, or if the stored credentials are invalid,
@@ -64,6 +65,7 @@ def get_credentials():
 	return credentials
 
 def doUpload(service, file_metadata, media, filePath):
+	global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID
 	filename = file_metadata.get("name")
 	fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
 
@@ -103,6 +105,7 @@ def convertToRFC3399(s):
 	return datetime.datetime.fromtimestamp(s).strftime('%Y-%m-%dT%H:%M:%S+05:30');
 
 def main():
+	global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID
 	"""Shows basic usage of the Google Drive API.
 
 	Creates a Google Drive API service object and outputs the names and IDs
@@ -126,9 +129,9 @@ def main():
 		
 		# fetch/assign id for all sub directories
 		for directory in dirs:
-			dirPath = root+"\\"+directory;
+			dirPath = root+os.path.sep+directory;
 			#check if the folder exist otherwise create it
-			results = service.files().list(pageSize=10,fields="files(id, name)",q="'"+currentFolderId+"' in parents and name = '"+directory+"' and mimeType = 'application/vnd.google-apps.folder' and trashed = false").execute()
+			results = service.files().list(pageSize=1,fields="files(id, name)",q="'"+currentFolderId+"' in parents and name = '"+directory+"' and mimeType = 'application/vnd.google-apps.folder' and trashed = false").execute()
 			items = results.get('files', [])
 			if not items:
 				# create the folder and store its id
@@ -148,7 +151,7 @@ def main():
 		# upload the files in the folder
 		print((len(path) - 1) * '---', os.path.basename(root))
 		for filename in files:
-			filePath = root+"\\"+filename
+			filePath = root+os.path.sep+filename
 			filenameDrive = filename.replace("'","\\'") # for single quote error in searching drive for file name
 			print(len(path) * '---', filename)
 			#check if file exists
