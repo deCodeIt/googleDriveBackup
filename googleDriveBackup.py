@@ -1,8 +1,12 @@
 from __future__ import print_function
 import httplib2
-import os
+import os, sys
 import datetime
 import hashlib
+
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
 
 from time import sleep
 from googleapiclient.http import MediaFileUpload
@@ -29,12 +33,91 @@ BKP_FOLDER_ID = '0B0dn6haaox2Vak9aNktqZmtLWTg'
 BKP_LOCAL_DIR = 'D:\Projects\Python\Drive API\BKP\Test'
 NUM_FILES_PER_REQUEST = 100
 
+class App(QWidget):
+ 
+	def __init__(self):
+		super().__init__()
+		self.title = 'Google Drive Smart BackUp'
+		self.left = 200
+		self.top = 200
+		self.width = 640
+		self.height = 480
+		self.initUI()
+
+	def initUI(self):
+		self.setWindowTitle(self.title)
+		self.setGeometry(self.left, self.top, self.width, self.height)
+		self.setFixedSize(self.width,self.height)
+		
+		self.createGridLayoutForBackupFolderSelection()
+
+		uploadButtonContainer = QHBoxLayout()
+
+		self.buttonForUpload = QPushButton('Upload', self)
+		self.buttonForUpload.setToolTip('Initiate BackUp')
+		self.buttonForUpload.clicked.connect(self.do_upload)
+
+		uploadButtonContainer.addStretch(8)
+		uploadButtonContainer.addWidget(self.buttonForUpload)
+
+		windowLayout = QVBoxLayout()
+		windowLayout.addWidget(self.horizontalGroupBox)
+		windowLayout.addLayout(uploadButtonContainer)
+		self.setLayout(windowLayout)
+
+
+		# self.statusBar().showMessage('Message in statusbar.')
+		self.show()
+
+	def createGridLayoutForBackupFolderSelection(self):
+		self.horizontalGroupBox = QGroupBox("BackUp Folder Selection")
+		self.horizontalGroupBox.setAlignment(Qt.AlignHCenter)
+		layout = QGridLayout()
+		layout.setRowStretch(1, 1)
+		layout.setColumnStretch(0, 9)
+		layout.setColumnStretch(1, 1)
+		
+		#hint for Qline/path of directory selected
+		self.textForFolderSelection = QLineEdit(self)
+		self.textForFolderSelection.setReadOnly(True)
+		self.textForFolderSelection.setPlaceholderText('Select a Folder to BackUp')
+
+		# button for folder selection
+		self.buttonForFolderSelection = QPushButton('Select', self)
+		self.buttonForFolderSelection.setToolTip('Choose folder to backUp')
+		self.buttonForFolderSelection.clicked.connect(self.on_click)
+
+		
+
+		layout.addWidget(self.textForFolderSelection,0,0) 
+		layout.addWidget(self.buttonForFolderSelection,0,1)
+
+		self.horizontalGroupBox.setLayout(layout)
+
+	def openFolderDialog(self):
+		global BKP_LOCAL_DIR
+		options = QFileDialog.Options()
+		# options |= QFileDialog.DontUseNativeDialog
+		options |= QFileDialog.ShowDirsOnly
+		folderPath = QFileDialog.getExistingDirectory(self,"Folder to BackUp", "", options=options)
+		if folderPath:
+			BKP_LOCAL_DIR = folderPath
+			self.textForFolderSelection.setText(BKP_LOCAL_DIR)
+
+
+	@pyqtSlot()
+	def on_click(self):
+		 self.openFolderDialog()
+
+	def do_upload(self):
+		mainUpload()
+
 def md5(fname):
-    hash_md5 = hashlib.md5()
-    with open(fname, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
+	hash_md5 = hashlib.md5()
+	with open(fname, "rb") as f:
+		for chunk in iter(lambda: f.read(4096), b""):
+			hash_md5.update(chunk)
+	return hash_md5.hexdigest()
 
 def get_credentials():
 	global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID
@@ -105,7 +188,7 @@ def doUpload(service, file_metadata, media, filePath):
 def convertToRFC3399(s):
 	return datetime.datetime.fromtimestamp(s).strftime('%Y-%m-%dT%H:%M:%S+05:30');
 
-def main():
+def mainUpload():
 	global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID, NUM_FILES_PER_REQUEST
 	"""Shows basic usage of the Google Drive API.
 
@@ -207,10 +290,11 @@ def main():
 
 if __name__ == '__main__':
 	try:
-		main()
+		app = QApplication(sys.argv)
+		ex = App()
+		sys.exit(app.exec_())
 	except KeyboardInterrupt as e:
 		print ("Terminated By User")
-	else:
-		print("Unknown Error has Occurred -_-? ")
+	
 		
 	
