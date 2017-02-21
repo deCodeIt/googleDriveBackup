@@ -3,6 +3,7 @@ import httplib2
 import os, sys
 import datetime
 import hashlib
+import pdb
 
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
@@ -44,21 +45,63 @@ class MyQLabel(QLabel):
 
         painter.drawText(self.rect(), self.alignment(), elided)
 
+class driveFoldersThread(QThread):
+	foldersLoaded = pyqtSignal(object)
+
+	def __init__(self,folderId):
+		QThread.__init__(self)
+		self.folderId = folderId
+		global DB,app
+		self.DB = DB
+		self.app = app
+
+	def __del__(self):
+		self.wait()
+
+	def getFolderDetails(self,currentFolderId='root'):
+		# returns object array [{'name':'....', 'id':'...'}, ...]
+		# get the list of files in this folder on cloud
+		folderOnCloud = []
+		pageToken = None
+		while True:
+			results = self.DB.service.files().list(pageSize=NUM_FILES_PER_REQUEST,pageToken = pageToken,fields="files(id, name), nextPageToken",q="'"+currentFolderId+"' in parents and 'me' in owners and mimeType = 'application/vnd.google-apps.folder' and trashed = false").execute()
+			folderItems = results.get('files',[])
+			if not folderItems:
+				break;
+			else:
+				# get files from array to our local dictionary
+				folderOnCloud.extend(folderItems);
+				if not results.get('nextPageToken',False):
+					break;
+				else:
+					pageToken = results.get('nextPageToken')
+		return folderOnCloud
+
+	def run(self):
+		folders = self.getFolderDetails(self.folderId)
+		self.foldersLoaded.emit(folders) # signal that the folder list has been fetched from cloud
+
+
+
 class DirectoryViewer(QScrollArea):
 	def __init__(self):
-		global DB
+		global DB, app
 		QScrollArea.__init__(self)
 		self.MAX_FOLDERS_IN_A_ROW = 7
-		self.DB = DB;
+		self.DB = DB
+		self.app = app
+		self.setStyleSheet('background-color:#FFF;')
 		self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-		#create a gridlayout for destination Cloud folder selection
+		self.setWidgetResizable(False)
+		self.loadingMovie = QMovie('icons/loading.gif')
+		
+		# self.initializeLoadingWidget()
+		
+		# #create a gridlayout for destination Cloud folder selection
 		self.driveLayout = QGridLayout()
 		self.driveLayout.setHorizontalSpacing(20)
-		# driveLayout.setColumnStretch(driveLayout.columnCount()+1,1)
-		# driveLayout.setRowStretch(driveLayout.rowCount()+1,1)
 
-		# #set the layout in a widget
+		# # #set the layout in a widget
 		self.qDriveWidget = QWidget()
 		self.qDriveWidget.setLayout(self.driveLayout)
 
@@ -76,13 +119,45 @@ class DirectoryViewer(QScrollArea):
 				# widgetToRemove.hide()
 				widgetToRemove.deleteLater()
 				widgetToRemove.setParent(None)
+	
+	def getLoadingWidget(self):
 		
+		_loadingImageContainer = QLabel()
+		_loadingImageContainer.setMovie(self.loadingMovie)
+		self.loadingMovie.start()
 
+		_loadingLabel = QLabel()
+		_loadingLabel.setText("Loading...")
+		_loadingLabel.setAlignment(Qt.AlignHCenter)
+
+		_loadingLayout = QVBoxLayout()
+		_loadingLayout.addWidget(_loadingImageContainer)
+		_loadingLayout.addWidget(_loadingLabel)
+
+		_loadingLayoutWidget = QWidget()
+		_loadingLayoutWidget.setLayout(_loadingLayout)
+
+		return _loadingLayoutWidget
+
+	def startLoading(self):
+		# self.loadingLayoutWidget.setStyleSheet('background-color:#FFF;')
+		self.setWidget(self.getLoadingWidget())
+		self.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+
+	@pyqtSlot(object)
+	def stopLoading(self,folders=[]):
+		self.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+		self._open_folder(folders)
+	
 	@pyqtSlot()
 	def open_folder(self,folderId='root'):
-		# print("Double Clicked: "+folderId)
-		folders = self.getFolderDetails(folderId)
-		self.safelyClearDriveLayout()
+		self.startLoading()
+		self.thread = driveFoldersThread(folderId)
+		self.thread.foldersLoaded.connect(self.stopLoading)
+		self.thread.start()
+
+	@pyqtSlot()
+	def _open_folder(self,folders):
 
 		self.driveLayout = QGridLayout()
 		self.driveLayout.setHorizontalSpacing(20)
@@ -94,10 +169,6 @@ class DirectoryViewer(QScrollArea):
 			notifyText = QLabel()
 			notifyText.setText("Folder is Empty")
 			notifyText.setAlignment(Qt.AlignHCenter)
-			# self.driveLayout.setColumnStretch(0,1)
-			# self.driveLayout.setColumnStretch(2,1)
-			# self.driveLayout.setRowStretch(0,1)
-			# self.driveLayout.setRowStretch(2,1)
 
 			self.driveLayout.addWidget(notifyText,1,1)
 
@@ -128,7 +199,7 @@ class DirectoryViewer(QScrollArea):
 
 			folderContainerWidget = QWidget()
 			folderContainerWidget.setLayout(folderContainer)
-			folderContainerWidget.setStyleSheet("background-color:yellow;")
+			# folderContainerWidget.setStyleSheet("background-color:yellow;")
 
 			self.driveLayout.addWidget(folderContainerWidget,r,c)
 
@@ -139,25 +210,6 @@ class DirectoryViewer(QScrollArea):
 				r+=1
 		#set the layout of directory Container to Directory grid layout
 		self.setWidget(self.qDriveWidget)
-	
-	def getFolderDetails(self,currentFolderId='root'):
-		# returns object array [{'name':'....', 'id':'...'}, ...]
-		# get the list of files in this folder on cloud
-		folderOnCloud = []
-		pageToken = None
-		while True:
-			results = self.DB.service.files().list(pageSize=NUM_FILES_PER_REQUEST,pageToken = pageToken,fields="files(id, name), nextPageToken",q="'"+currentFolderId+"' in parents and 'me' in owners and mimeType = 'application/vnd.google-apps.folder' and trashed = false").execute()
-			folderItems = results.get('files',[])
-			if not folderItems:
-				break;
-			else:
-				# get files from array to our local dictionary
-				folderOnCloud.extend(folderItems);
-				if not results.get('nextPageToken',False):
-					break;
-				else:
-					pageToken = results.get('nextPageToken')
-		return folderOnCloud
 
 class QDoublePushButton(QPushButton):
     doubleClicked = pyqtSignal()
