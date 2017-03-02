@@ -20,7 +20,7 @@ flags = None
 try:
 	import argparse
 	parser = argparse.ArgumentParser(parents=[tools.argparser])
-	parser.add_argument("-d","--directory",help="The directory path to backup");
+	# parser.add_argument("-d","--directory",help="The directory path to backup");
 	flags = parser.parse_args()
 except ImportError:
 	pass
@@ -30,8 +30,9 @@ except ImportError:
 SCOPES = 'https://www.googleapis.com/auth/drive'
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Drive API Python Quickstart'
-BKP_FOLDER_ID = '0B0dn6haaox2Vak9aNktqZmtLWTg'
-BKP_LOCAL_DIR = 'D:\Projects\Python\Drive API\BKP\Test'
+# BKP_FOLDER_ID = '0B0dn6haaox2Vak9aNktqZmtLWTg'
+BKP_FOLDER_ID = 'root'
+BKP_LOCAL_DIR = None
 NUM_FILES_PER_REQUEST = 100
 DB = None # stores the DriveBackup object
 
@@ -44,6 +45,29 @@ class MyQLabel(QLabel):
         elided  = metrics.elidedText(self.text(), Qt.ElideRight, self.width())
 
         painter.drawText(self.rect(), self.alignment(), elided)
+
+class QDoublePushButton(QPushButton):
+    doubleClicked = pyqtSignal()
+    clicked = pyqtSignal()
+    selected = pyqtSignal()
+
+    def __init__(self, *args, **kwargs):
+        QPushButton.__init__(self, *args, **kwargs)
+        self.setSizePolicy ( QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.timer = QTimer()
+        self.timer.setSingleShot(True)
+        super().clicked.connect(self.selected.emit)
+        self.timer.timeout.connect(self.clicked.emit)
+        super().clicked.connect(self.checkDoubleClick)
+
+    @pyqtSlot()
+    def checkDoubleClick(self):
+        if self.timer.isActive():
+            self.doubleClicked.emit()
+            self.timer.stop()
+        else:
+            self.timer.start(250)
+
 
 class driveFoldersThread(QThread):
 	foldersLoaded = pyqtSignal(object)
@@ -81,13 +105,70 @@ class driveFoldersThread(QThread):
 		folders = self.getFolderDetails(self.folderId)
 		self.foldersLoaded.emit(folders) # signal that the folder list has been fetched from cloud
 
+class Folder(QWidget):
+	'''Displays the folder content as folder icon and folder label'''
+	
+	folderSelected = pyqtSignal(object)
+	folderOpen = pyqtSignal(object)
+
+	def __init__(self,folder):
+		QWidget.__init__(self)
+		self.folder = folder
+		self.initUI()
+
+	def initUI(self):
+		self.b = QDoublePushButton('')
+		self.b.setFixedSize(48,48)
+		self.b.setFlat(True)
+		self.b.setIcon(QIcon('icons/folder_blue.png'))
+		self.b.setIconSize(QSize(48,48))
+		self.b.setToolTip(self.folder["name"])
+		
+		self.b.doubleClicked.connect(lambda _folder=self.folder : self.folderOpen.emit(_folder))
+
+		self.dirName = MyQLabel()
+		self.dirName.setText(self.folder["name"])
+		# self.dirName.setReadOnly(True)
+		self.dirName.setWordWrap(True)
+		self.dirName.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
+		self.dirName.setFixedWidth(48)
+		self.dirName.setFixedHeight(16)
+		# dirName.setStyleSheet("background-color:yellow;")
+		self.dirName.setAlignment(Qt.AlignHCenter)
+
+		# highlight this folder label when selected
+		self.b.selected.connect(self.selectFolder)
+
+		folderContainer = QVBoxLayout()
+		folderContainer.addWidget(self.b)
+		folderContainer.addWidget(self.dirName)
+		# folderContainerWidget = QWidget()
+		# folderContainerWidget.setLayout(folderContainer)
+		self.setLayout(folderContainer)
+		# folderContainerWidget.setStyleSheet("background-color:yellow;")
+
+	@pyqtSlot()
+	def selectFolder(self):
+		# b.setStyleSheet('background-color:#FFFF00;')
+		self.highlightFolder()
+		self.folderSelected.emit( self.folder ) # signals which folder is clicked
+
+	def highlightFolder(self,select=True):
+		if select:
+			self.dirName.setStyleSheet('background-color:#FFFF00;')
+		else:
+			self.dirName.setStyleSheet('background-color:#FFFFFF;')
 
 
 class DirectoryViewer(QScrollArea):
+	'''
+		shows the directories in the GUI as scrollArea
+	'''
 	def __init__(self):
 		global DB, app
 		QScrollArea.__init__(self)
 		self.MAX_FOLDERS_IN_A_ROW = 7
+		self.remoteBackupFolderId = 'root' # by default upload to root/home directory
 		self.DB = DB
 		self.app = app
 		self.setStyleSheet('background-color:#FFF;')
@@ -108,6 +189,7 @@ class DirectoryViewer(QScrollArea):
 		self.open_folder('root')
 
 	def safelyClearDriveLayout(self):
+		'''Remove the  previously loaded contents on GUI from memory'''
 		if not self.driveLayout:
 			pass;
 		else:
@@ -121,7 +203,7 @@ class DirectoryViewer(QScrollArea):
 				widgetToRemove.setParent(None)
 	
 	def getLoadingWidget(self):
-		
+		'''The loading icon shown while fetching directories from server'''
 		_loadingImageContainer = QLabel()
 		_loadingImageContainer.setMovie(self.loadingMovie)
 		self.loadingMovie.start()
@@ -140,17 +222,21 @@ class DirectoryViewer(QScrollArea):
 		return _loadingLayoutWidget
 
 	def startLoading(self):
+		'''Display the Loading GUI'''
 		# self.loadingLayoutWidget.setStyleSheet('background-color:#FFF;')
 		self.setWidget(self.getLoadingWidget())
 		self.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
 
 	@pyqtSlot(object)
 	def stopLoading(self,folders=[]):
+		'''Stop the loading GUI and display fetched directories'''
 		self.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 		self._open_folder(folders)
 	
 	@pyqtSlot()
 	def open_folder(self,folderId='root'):
+		'''fetch the directory contents(directories only) of the selected directory'''
+		self.remoteBackupFolderId = folderId # sets the folder to be backed up
 		self.startLoading()
 		self.thread = driveFoldersThread(folderId)
 		self.thread.foldersLoaded.connect(self.stopLoading)
@@ -158,7 +244,7 @@ class DirectoryViewer(QScrollArea):
 
 	@pyqtSlot()
 	def _open_folder(self,folders):
-
+		'''Display the fetched folders from folder list in GUI'''
 		self.driveLayout = QGridLayout()
 		self.driveLayout.setHorizontalSpacing(20)
 		self.qDriveWidget = QWidget()
@@ -176,31 +262,10 @@ class DirectoryViewer(QScrollArea):
 		r = 0
 		c = 0
 		for folder in folders:
-			b = QDoublePushButton('')
-			b.setFixedSize(48,48)
-			b.setFlat(True)
-			b.setIcon(QIcon('icons/folder_blue.png'))
-			b.setIconSize(QSize(48,48))
-			b.setToolTip(folder["name"])
-			b.doubleClicked.connect(lambda _folderId=folder["id"] : self.open_folder(_folderId))
-
-			dirName = MyQLabel()
-			dirName.setText(folder["name"])
-			# dirName.setReadOnly(True)
-			dirName.setWordWrap(True)
-			dirName.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
-			dirName.setFixedWidth(48)
-			# dirName.setStyleSheet("background-color:yellow;")
-			dirName.setAlignment(Qt.AlignHCenter)
-
-			folderContainer = QVBoxLayout()
-			folderContainer.addWidget(b)
-			folderContainer.addWidget(dirName)
-
-			folderContainerWidget = QWidget()
-			folderContainerWidget.setLayout(folderContainer)
-			# folderContainerWidget.setStyleSheet("background-color:yellow;")
-
+			
+			folderContainerWidget = Folder(folder);
+			folderContainerWidget.folderSelected.connect(self.select_folder)
+			folderContainerWidget.folderOpen.connect(self.view_folder)
 			self.driveLayout.addWidget(folderContainerWidget,r,c)
 
 			# change the row and column for next folder
@@ -211,28 +276,27 @@ class DirectoryViewer(QScrollArea):
 		#set the layout of directory Container to Directory grid layout
 		self.setWidget(self.qDriveWidget)
 
-class QDoublePushButton(QPushButton):
-    doubleClicked = pyqtSignal()
-    clicked = pyqtSignal()
+	@pyqtSlot(object)
+	def view_folder(self,folder=None):
+		''' process and then open the selected folder'''
 
-    def __init__(self, *args, **kwargs):
-        QPushButton.__init__(self, *args, **kwargs)
-        self.setSizePolicy ( QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.timer = QTimer()
-        self.timer.setSingleShot(True)
-        self.timer.timeout.connect(self.clicked.emit)
-        super().clicked.connect(self.checkDoubleClick)
+		self.open_folder(folder["id"])
 
-    @pyqtSlot()
-    def checkDoubleClick(self):
-        if self.timer.isActive():
-            self.doubleClicked.emit()
-            self.timer.stop()
-        else:
-            self.timer.start(250)
+	@pyqtSlot(object)
+	def select_folder(self,folder=None):
+		# pdb.set_trace()
+		self.remoteBackupFolderId = folder["id"] # sets the folder to be backed up
+		for i in range(self.driveLayout.count()):
+			fcw = self.driveLayout.itemAt(i).widget() # gets the widget
+			if fcw.folder["name"] == folder["name"]:
+				fcw.highlightFolder(True) # highlight the selected folder
+			else:
+				fcw.highlightFolder(False) # removes highlight from other folders
+
+
 
 class App(QWidget):
- 
+	global BKP_FOLDER_ID,DB
 	def __init__(self):
 		super().__init__()
 		self.title = 'Google Drive Smart BackUp'
@@ -240,6 +304,8 @@ class App(QWidget):
 		self.top = 200
 		self.width = 640
 		self.height = 480
+		self.scrollDirectoryContainer = None
+		self.DB = DB
 		self.initUI()
 
 	def initUI(self):
@@ -267,6 +333,9 @@ class App(QWidget):
 		self.show()
 
 	def createGridLayoutForBackupFolderSelection(self):
+		"""
+		As the name suggests, it creates the layout for
+		"""
 		horizontalGroupBox = QGroupBox("BackUp Folder Selection")
 		horizontalGroupBox.setAlignment(Qt.AlignHCenter)
 		layout = QGridLayout()
@@ -286,21 +355,23 @@ class App(QWidget):
 		self.buttonForFolderSelection.clicked.connect(self.openFolderDialog)
 
 		#create a scrollArea for directories to be visible
-		scrollDirectoryContainer = DirectoryViewer()
-		
+		self.scrollDirectoryContainer = DirectoryViewer()
 
+		# add the widgets accordingly
 		layout.addWidget(self.textForFolderSelection,1,0) 
 		layout.addWidget(self.buttonForFolderSelection,1,1)
-		layout.addWidget(scrollDirectoryContainer,2,0,1,2)
+		layout.addWidget(self.scrollDirectoryContainer,2,0,1,2)
 
 		horizontalGroupBox.setLayout(layout)
 
+		# button at bottom to initiate backup
 		uploadButtonContainer = QHBoxLayout()
 
 		buttonForUpload = QPushButton('BackUp Now', self)
 		buttonForUpload.setToolTip('Initiate BackUp')
 		buttonForUpload.clicked.connect(self.do_upload)
 
+		# for Right Alignment
 		uploadButtonContainer.addStretch(8)
 		uploadButtonContainer.addWidget(buttonForUpload)
 
@@ -312,6 +383,9 @@ class App(QWidget):
 
 	@pyqtSlot()
 	def openFolderDialog(self):
+		"""
+		Asks user to choose the Local folder that needs to be backed up on drive
+		"""
 		global BKP_LOCAL_DIR
 		options = QFileDialog.Options()
 		# options |= QFileDialog.DontUseNativeDialog
@@ -323,7 +397,9 @@ class App(QWidget):
 
 
 	def do_upload(self):
-		mainUpload()
+		global BKP_FOLDER_ID
+		BKP_FOLDER_ID = self.scrollDirectoryContainer.remoteBackupFolderId
+		self.DB.mainUpload()
 
 class DriveBackup():
 
@@ -363,10 +439,10 @@ class DriveBackup():
 			print('Storing credentials to ' + credential_path)
 		return credentials
 
-	def doUpload(self,service, file_metadata, media, filePath):
+	def doUpload(self, file_metadata, media, filePath):
 		global SCOPES, CLIENT_SECRET_FILE, APPLICATION_NAME, BKP_LOCAL_DIR, BKP_FOLDER_ID
 		filename = file_metadata.get("name")
-		fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
+		fileUploaded = self.service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
 
 		response = None
 		flag = False
@@ -383,13 +459,13 @@ class DriveBackup():
 					flag = True # end the file upload
 				else:
 					print("File's corrupted on Drive, Uploading Again :(", end="\r")
-					fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
+					fileUploaded = self.service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
 				
 			except HttpError as e:
 				print (e.resp.status)
 				if e.resp.status in [ 402, 404]:
 				# Start the upload all over again.
-					fileUploaded = service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
+					fileUploaded = self.service.files().create(body=file_metadata, media_body=media, fields='id,md5Checksum')
 				elif e.resp.status in [500, 502, 503, 504, 408]:
 					continue
 				# Call next_chunk() again, but use an exponential backoff for repeated errors.
@@ -409,22 +485,24 @@ class DriveBackup():
 		for up to 10 files.
 		"""
 		# backup the supplied directory
-		if flags and flags.directory:
-			BKP_LOCAL_DIR = flags.directory
+		# if flags and flags.directory:
+		# 	BKP_LOCAL_DIR = flags.directory
 
 		folderId = {BKP_LOCAL_DIR:BKP_FOLDER_ID}
+		print(folderId)
 
 		# traverse root directory, and list directories as dirs and files as files
 		for root, dirs, files in os.walk(BKP_LOCAL_DIR):
 			path = root.split(os.sep)
 			folderName = os.path.basename(root)
-			currentFolderId = folderId.get(root,None)
+			# currentFolderId = folderId.get(root,None)
+			currentFolderId = folderId.get(root,'root')
 			
 			# fetch/assign id for all sub directories
 			for directory in dirs:
 				dirPath = root+os.path.sep+directory;
 				#check if the folder exist otherwise create it
-				results = service.files().list(pageSize=1,fields="files(id, name)",q="'"+currentFolderId+"' in parents and name = '"+directory+"' and mimeType = 'application/vnd.google-apps.folder' and trashed = false").execute()
+				results = self.service.files().list(pageSize=1,fields="files(id, name)",q="'"+currentFolderId+"' in parents and name = '"+directory+"' and mimeType = 'application/vnd.google-apps.folder' and trashed = false").execute()
 				items = results.get('files', [])
 				if not items:
 					# create the folder and store its id
@@ -435,7 +513,7 @@ class DriveBackup():
 					'createdTime' : convertToRFC3399(os.path.getctime(dirPath)),
 					'modifiedTime' : convertToRFC3399(os.path.getmtime(dirPath))
 					}
-					createdfolder =service.files().create(body=file_metadata, fields='id').execute()
+					createdfolder = self.service.files().create(body=file_metadata, fields='id').execute()
 					folderId[dirPath] = createdfolder['id']
 				else:
 					# the folder is present on cloud so store its id
@@ -444,7 +522,7 @@ class DriveBackup():
 			filesOnCloud = {}
 			pageToken = None
 			while True:
-				results = service.files().list(pageSize=NUM_FILES_PER_REQUEST,pageToken = pageToken,fields="files(id, name,md5Checksum), nextPageToken",q="'"+currentFolderId+"' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false").execute()
+				results = self.service.files().list(pageSize=NUM_FILES_PER_REQUEST,pageToken = pageToken,fields="files(id, name,md5Checksum), nextPageToken",q="'"+currentFolderId+"' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false").execute()
 				fileItems = results.get('files',[])
 				if not fileItems:
 					break;
@@ -483,10 +561,10 @@ class DriveBackup():
 					'modifiedTime' : convertToRFC3399(os.path.getmtime(filePath))
 					}
 					media = MediaFileUpload(filePath, chunksize=1048576, resumable=True)
-					self.doUpload(service,file_metadata,media, filePath)
+					self.doUpload(file_metadata,media, filePath)
 				
 
-		# results = service.files().list(
+		# results = self.service.files().list(
 		# 	pageSize=20,fields="nextPageToken, files(id, name, md5Checksum, parents)",q="'"+BKP_FOLDER_ID+"' in parents and trashed = false").execute()
 		# items = results.get('files', [])
 		# print(results)
